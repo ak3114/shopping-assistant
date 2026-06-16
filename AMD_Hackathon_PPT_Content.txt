@@ -1,0 +1,204 @@
+AI Personal Stylist & Shopping Agent — AMD Hackathon PPT Content
+================================================================
+
+Project subtitle (optional):
+  Agentic multi-tool pipeline · Qwen3-32B + Qwen2.5-VL · vLLM on AMD Instinct MI300X
+
+
+================================================================
+SLIDE 1: PERFORMANCE & SYSTEM METRICS
+================================================================
+
+MODELS USED
+-----------
+| Model                          | Role                                              | Serving                    |
+|--------------------------------|---------------------------------------------------|----------------------------|
+| Qwen/Qwen3-32B                 | Intent routing, outfit generation, review         | vLLM on ROCm, port 8000    |
+|                                | analysis, explanations                            |                            |
+| Qwen/Qwen2.5-VL-7B-Instruct    | User photo analysis (skin tone, body type, style) | vLLM on ROCm, port 8001    |
+
+Platform: AMD Instinct MI300X (192 GB HBM3 VRAM)
+Both models served locally via vLLM + ROCm (no cloud API)
+
+
+NUMBER OF TOKENS USED (EXAMPLE SCENARIOS)
+-----------------------------------------
+Use these as estimated ranges from the pipeline design.
+Replace with measured numbers from vLLM logs if available.
+
+Scenario 1 — Product search: "recommend running shoes under ₹3,000"
+  LLM calls: Intent (1) + review analysis (up to 12 products) + explanations (3)
+  Est. tokens: ~12,000–18,000 text tokens
+
+Scenario 2 — Outfit build: "wedding outfits, budget ₹15,000" (fast mode)
+  LLM calls: Intent (1) + outfit generation (1) + heuristic ranking (no per-product LLM)
+  Est. tokens: ~4,000–6,000 text tokens
+
+Scenario 3 — Photo + outfit: upload photo + wedding outfit request
+  LLM calls: Vision analysis (1) + intent + outfit generation
+  Est. tokens: ~1,500–3,000 vision tokens + ~5,000–7,000 text tokens
+
+Notes for jury:
+  - Outfit mode uses FAST_OUTFIT_MODE = True → skips 12× LLM review calls (~10× faster demo)
+  - Product search mode runs full LLM review analysis on top candidates before ranking
+  - Ranking itself is local Python (no tokens); DuckDuckGo search is external (no LLM tokens)
+
+One-liner for slide:
+  "Typical demo: ~5K tokens (outfit) to ~15K tokens (full product search with review intelligence)."
+
+
+END-TO-END LATENCY
+------------------
+| Scenario                              | Latency (typical) | Breakdown                                              |
+|---------------------------------------|-------------------|--------------------------------------------------------|
+| Product search (3 recommendations)  | 45–90 sec         | DDG search ~5–10s · LLM review ×12 ~30–60s · explain ~10–15s |
+| 3 complete outfit boards (fast mode)  | 30–60 sec         | Outfit LLM ~8–15s · 12 Amazon searches ~20–40s · rank ~2s |
+| Photo upload + outfit build           | 40–80 sec         | Vision ~5–15s · outfit pipeline ~30–60s                  |
+| Intent-only / chat                    | 2–5 sec           | Single Qwen3-32B call                                  |
+
+Architecture optimizations for demo speed:
+  - Vision image resize to 768px, 30s timeout
+  - DuckDuckGo 8s search timeout
+  - Heuristic review scoring in outfit mode (no extra LLM per slot)
+
+
+GPU USAGE & MEMORY (RIGHT-SIZING)
+---------------------------------
+Hardware: AMD Instinct MI300X — 192 GB VRAM
+
+Single GPU deployment (typical hackathon pod):
+  Text (Qwen3-32B):   --gpu-memory-utilization 0.55 (~105 GB)
+  Vision (Qwen2.5-VL-7B): 0.18 (~35 GB) on same GPU
+  Total VRAM: ~130–145 GB / 192 GB (~68–75%)
+
+Dual GPU deployment (if 2× MI300X available):
+  GPU 0 — Text @ 85% (~163 GB)
+  GPU 1 — Vision @ 30% (~58 GB)
+  Split across 2 GPUs
+
+Why MI300X fits this workload:
+  - Runs 32B text + 7B vision concurrently on one 192 GB card
+  - bf16 inference via vLLM on ROCm
+  - Large VRAM avoids model offloading and supports long JSON outfit responses (up to 4K tokens)
+
+Monitoring commands (mention in talk if asked):
+  rocm-smi --showmeminfo VRAM --showuse
+  watch -n1 rocm-smi
+
+
+================================================================
+SLIDE 2: IMPACT & DEMO SUMMARY
+================================================================
+
+EXPECTED IMPACT / VALUE
+-----------------------
+
+For shoppers (experience):
+  - Turns a vague request ("I'm going to a wedding, budget ₹15K") into 3 shoppable
+    outfit boards with real Amazon buy links
+  - Personalizes via photo analysis (skin tone, body type, color palette) when user
+    uploads a photo
+  - Surfaces ranked products with review-aware scoring — not just search results
+
+For business (efficiency & scale):
+  - Agentic pipeline replaces manual browsing across Amazon, Flipkart, Myntra, Ajio, Nykaa
+  - Local LLM inference on AMD — no per-query cloud API cost, data stays on-prem
+  - Modular tools (vision → stylist → search → review → rank) scale to other domains
+
+Productivity gain (demo narrative):
+  "What takes 30–45 minutes of manual comparison across sites → under 1 minute with
+   ranked, explained recommendations."
+
+
+KEY DIFFERENTIATORS / INNOVATION
+--------------------------------
+1. Multi-agent orchestration on AMD — single Gradio UI routes to vision, stylist,
+   shopping, and outfit agents via intent classification
+
+2. Dual-model architecture on MI300X — Qwen3-32B (reasoning) + Qwen2.5-VL-7B (vision)
+   co-located via vLLM + ROCm
+
+3. Review intelligence, not just ratings — LLM extracts pros/cons/sentiment; composite
+   ranking: rating 40% · review quality 30% · budget 20% · style 10%
+
+4. Complete outfit assembly — generates 3 distinct occasion-based looks, searches each
+   slot (top/bottom/footwear/accessories), gender-aware filtering
+
+5. India-first commerce — DuckDuckGo + site:amazon.in / Flipkart / Myntra with INR
+   budget parsing ("15k", "₹15000")
+
+6. Demo-hardened — fast outfit mode, fallback outfit templates, resilient Gradio UI,
+   vision timeout guards
+
+
+DEMO FLOW OVERVIEW (WHAT THE JURY SHOULD NOTICE)
+------------------------------------------------
+Live demo script (~3–4 min):
+
+Step 1 — Show infrastructure
+  Two vLLM servers running on MI300X (ports 8000 + 8001); mention 192 GB VRAM
+
+Step 2 — Open Gradio UI
+  Chat + photo upload + budget/occasion/gender controls
+
+Step 3 — Demo A: Product search
+  Input: "recommend running shoes under 3000"
+  Show: Intent routing → product cards with price, rating, Buy link, stylist explanation
+
+Step 4 — Demo B: Outfit build
+  Input: "I am attending my friend's wedding, budget 15000" · Gender: Male/Female
+  Show: 3 distinct outfit boards (Outfit 1/2/3) with 4 slots each, total price,
+        style reasoning
+
+Step 5 — Demo C: Personalization (optional)
+  Upload user photo → vision profile (skin tone, body type, style) → outfit
+  recommendations adapt
+
+Step 6 — Call out AMD value
+  Entire pipeline runs locally on ROCm; no external LLM API; MI300X holds both models
+  in VRAM
+
+Elevator pitch:
+  "An AI personal stylist that sees you, understands the occasion, searches Indian
+   e-commerce, reads the reviews, and delivers ranked outfits you can buy — all on
+   AMD MI300X."
+
+
+================================================================
+ARCHITECTURE (OPTIONAL EXTRA SLIDE)
+================================================================
+
+User → Orchestrator → [Vision Tool] → Stylist Tool → Product Search → Review Analysis → Ranking → Response
+
+Pipeline modules:
+  1.  Environment Setup       — pip install, ROCm GPU check
+  2.  vLLM Clients            — text_client, vision_client, llm_json_call()
+  3.  Data Models             — UserProfile, Outfit, Product, Recommendation, etc.
+  4.  Vision Tool             — analyze_user_image() → Qwen2.5-VL
+  5.  Stylist Tool            — generate_outfits() → Qwen3-32B
+  6.  Product Search          — search_products() → DuckDuckGo + site: filters
+  7.  Review Analysis         — analyze_reviews() → Qwen3-32B
+  8.  Ranking                 — rank_products() → weighted scoring
+  9.  Shopping Agent          — recommend_products() → search + review + rank
+  10. Outfit Agent            — build_complete_outfits() → stylist + search + assemble
+  11. Orchestrator            — StylistOrchestrator.process() → intent routing
+  12. Gradio UI               — Chat + image upload + HTML product/outfit cards
+
+
+================================================================
+GRADIO DEMO EXAMPLES (PRE-FILLED)
+================================================================
+  - "recommend running shoes under 3000"          | Budget: 3000  | Occasion: —       | Gender: unisex
+  - "I am attending my friend's wedding, budget 15000" | Budget: 15000 | Occasion: wedding | Gender: female
+  - "find me a casual linen shirt under 2000"     | Budget: 2000  | Occasion: casual  | Gender: male
+  - "suggest formal office wear under 8000"        | Budget: 8000  | Occasion: office  | Gender: female
+
+
+================================================================
+TIP: STRONGER METRICS FOR SUBMISSION
+================================================================
+Run one demo before submitting and grab real numbers from notebook logs:
+  - "Vision step finished in X.Xs"
+  - vLLM server logs show prompt_tokens / completion_tokens
+
+Replace estimated ranges above with measured values — judges prefer measured over estimated.
